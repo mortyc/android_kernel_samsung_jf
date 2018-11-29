@@ -129,15 +129,13 @@ static int sec_bat_set_charge(
 				bool enable)
 {
 	union power_supply_propval val;
-	ktime_t current_time;
 	struct timespec ts;
 
 	val.intval = battery->status;
 	psy_do_property("sec-charger", set,
 		POWER_SUPPLY_PROP_STATUS, val);
 
-	current_time = ktime_get_boottime();
-	ts = ktime_to_timespec(current_time);
+	get_monotonic_boottime(&ts);
 
 	if (enable) {
 		val.intval = battery->cable_type;
@@ -939,20 +937,25 @@ static void  sec_bat_event_program_alarm(
 	ktime_t next;
 
 	next = ktime_add(battery->last_event_time, low_interval);
-	alarm_start_relative(&battery->event_termination_alarm, next);
+	/* The original slack time called for, 20 seconds, exceeds
+     * the length allowed for an unsigned long in nanoseconds. Use
+     * ULONG_MAX instead
+     */
+	hrtimer_start_range_ns(&battery->event_termination_hrtimer,
+	next, ULONG_MAX, HRTIMER_MODE_ABS);
 }
 
-static enum alarmtimer_restart sec_bat_event_expired_timer_func(struct alarm *alarm, ktime_t now)
+enum hrtimer_restart sec_bat_event_expired_timer_func(struct hrtimer *timer)
 {
 	struct sec_battery_info *battery =
-		container_of(alarm, struct sec_battery_info,
-			event_termination_alarm);
+		container_of(timer, struct sec_battery_info,
+			event_termination_hrtimer);
 
 	battery->event &= (~battery->event_wait);
 	dev_info(battery->dev,
 		"%s: event expired (0x%x)\n", __func__, battery->event);
 
-	return ALARMTIMER_NORESTART;
+	return HRTIMER_NORESTART;
 }
 
 static void sec_bat_event_set(
@@ -971,7 +974,7 @@ static void sec_bat_event_set(
 		return;
 	}
 
-	alarm_cancel(&battery->event_termination_alarm);
+	hrtimer_cancel(&battery->event_termination_hrtimer);
 	battery->event &= (~battery->event_wait);
 
 	if (enable) {
@@ -1116,11 +1119,9 @@ static bool sec_bat_time_management(
 				struct sec_battery_info *battery)
 {
 	unsigned long charging_time;
-	ktime_t	current_time;
 	struct timespec ts;
 
-	current_time = ktime_get_boottime();
-	ts = ktime_to_timespec(current_time);
+	get_monotonic_boottime(&ts);
 
 	if (battery->charging_start_time == 0) {
 		dev_dbg(battery->dev,
@@ -1619,13 +1620,18 @@ static void sec_bat_program_alarm(
 	ktime_t next;
 
 	next = ktime_add(battery->last_poll_time, low_interval);
-	alarm_start_relative(&battery->event_termination_alarm, next);
+	/* The original slack time called for, 10 seconds, exceeds
+     * the length allowed for an unsigned long in nanoseconds. Use
+     * ULONG_MAX instead
+     */
+	hrtimer_start_range_ns(&battery->polling_hrtimer,
+		next, ULONG_MAX, HRTIMER_MODE_ABS);
 }
 
-static enum alarmtimer_restart sec_bat_alarm(struct alarm *alarm, ktime_t now)
+enum hrtimer_restart sec_bat_alarm(struct hrtimer *timer)
 {
-	struct sec_battery_info *battery = container_of(alarm,
-				struct sec_battery_info, polling_alarm);
+	struct sec_battery_info *battery = container_of(timer,
+				struct sec_battery_info, polling_hrtimer);
 
 	/* In wake up, monitor work will be queued in complete function
 	 * To avoid duplicated queuing of monitor work,
@@ -1637,7 +1643,7 @@ static enum alarmtimer_restart sec_bat_alarm(struct alarm *alarm, ktime_t now)
 		dev_dbg(battery->dev, "%s: Activated\n", __func__);
 	}
 
-	return ALARMTIMER_NORESTART;
+	return HRTIMER_NORESTART;
 }
 
 
@@ -1801,7 +1807,7 @@ static void sec_bat_monitor_work(
 
 	dev_dbg(battery->dev, "%s: Start\n", __func__);
 
-	c_ts = ktime_to_timespec(ktime_get_boottime());
+    get_monotonic_boottime(&c_ts);
 
 	/* monitor once after wakeup */
 	if (battery->polling_in_sleep) {
@@ -2730,10 +2736,10 @@ static int sec_bat_get_property(struct power_supply *psy,
 		val->intval = battery->voltage_avg * 1000;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		val->intval = battery->current_now;
+		val->intval = battery->current_now * 1000;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
-		val->intval = battery->current_avg;
+		val->intval = battery->current_avg * 1000;
 		break;
 	/* charging mode (differ from power supply) */
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
@@ -3027,9 +3033,11 @@ static int __devinit sec_battery_probe(struct platform_device *pdev)
 #endif
 	battery->ps_enable= 0;
 
-	alarm_init(&battery->event_termination_alarm,
-			ALARM_REALTIME,
-			sec_bat_event_expired_timer_func);
+	hrtimer_init(&battery->event_termination_hrtimer,
+					CLOCK_BOOTTIME,
+					HRTIMER_MODE_ABS);
+	battery->event_termination_hrtimer.function =
+					&sec_bat_event_expired_timer_func;
 
 	battery->temp_high_threshold =
 		pdata->temp_high_threshold_normal;
@@ -3095,9 +3103,11 @@ static int __devinit sec_battery_probe(struct platform_device *pdev)
 		break;
 	case SEC_BATTERY_MONITOR_ALARM:
 		battery->last_poll_time = ktime_get_boottime();
-		alarm_init(&battery->polling_alarm,
-			ALARM_REALTIME,
-			sec_bat_alarm);
+		hrtimer_init(&battery->polling_hrtimer,
+						CLOCK_BOOTTIME,
+						HRTIMER_MODE_ABS);
+		battery->polling_hrtimer.function =
+			&sec_bat_alarm;
 		break;
 	default:
 		break;
@@ -3224,13 +3234,13 @@ static int __devexit sec_battery_remove(struct platform_device *pdev)
 		cancel_delayed_work(&battery->polling_work);
 		break;
 	case SEC_BATTERY_MONITOR_ALARM:
-		alarm_cancel(&battery->polling_alarm);
+		hrtimer_cancel(&battery->polling_hrtimer);
 		break;
 	default:
 		break;
 	}
 
-	alarm_cancel(&battery->event_termination_alarm);
+	hrtimer_cancel(&battery->event_termination_hrtimer);
 	flush_workqueue(battery->monitor_wqueue);
 	destroy_workqueue(battery->monitor_wqueue);
 	wake_lock_destroy(&battery->monitor_wake_lock);
@@ -3264,7 +3274,7 @@ static int sec_battery_prepare(struct device *dev)
 		cancel_delayed_work(&battery->polling_work);
 		break;
 	case SEC_BATTERY_MONITOR_ALARM:
-		alarm_cancel(&battery->polling_alarm);
+		hrtimer_cancel(&battery->polling_hrtimer);
 		break;
 	default:
 		break;
@@ -3307,7 +3317,7 @@ static void sec_battery_complete(struct device *dev)
 
 	/* cancel current alarm and reset after monitor work */
 	if (battery->pdata->polling_type == SEC_BATTERY_MONITOR_ALARM)
-		alarm_cancel(&battery->polling_alarm);
+		hrtimer_cancel(&battery->polling_hrtimer);
 
 	wake_lock(&battery->monitor_wake_lock);
 	queue_work(battery->monitor_wqueue,

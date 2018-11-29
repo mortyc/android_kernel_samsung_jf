@@ -13,8 +13,9 @@ config ANDROID_BINDER_IPC
 	default n
 
 config ANDROID_BINDER_IPC_32BIT
-	bool "Use old 32-bit binder api"
-	depends on !64BIT
+	bool "Use old (Android 4.4 and earlier) 32-bit binder API"
+	depends on !64BIT && ANDROID_BINDER_IPC
+	default y
 	---help---
 	  Enable to support an old 32-bit Android user-space. Breaks the new
 	  Android user-space.
@@ -75,6 +76,12 @@ config ANDROID_TIMED_GPIO
 	tristate "Android timed gpio driver"
 	depends on GENERIC_GPIO && ANDROID_TIMED_OUTPUT
 	default n
+config ANDROID_DOZE_HELPER
+	bool "Android Doze Helper"
+	default N
+	---help---
+	  Android Doze powesaving helper module. 
+	  Turns on full Doze mode when screen is off.
 
 config ANDROID_LOW_MEMORY_KILLER
 	bool "Android Low Memory Killer"

@@ -1776,14 +1776,38 @@ config MSM_CPU_FREQ_SET_MIN_MAX
 config MSM_CPU_FREQ_MAX
 	int "Max CPU Frequency"
 	depends on MSM_CPU_FREQ_SET_MIN_MAX
-	default 384000
+	default 1890000
 
 config MSM_CPU_FREQ_MIN
 	int "Min CPU Frequency"
 	depends on MSM_CPU_FREQ_SET_MIN_MAX
-	default 245760
+	default 270000
 
 endif # CPU_FREQ_MSM
+
+
+config MSM_CPUFREQ_LIMITER
+	tristate "MSM CPU frequency limiter"
+	default n
+	help
+	  This driver limits MSM CPU frequency through sysfs file system.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cpufreq_stats.
+
+	  If in doubt, say N.
+
+config CPU_VOLTAGE_TABLE
+	bool "Enable CPU Voltage Table via sysfs for adjustements"
+	default n
+	help
+	  Krait User Voltage Control
+
+config LOW_CPUCLOCKS
+	bool "Enable ultra low CPU clocks"
+	default n
+	help
+	  Ultra low cpu frequencies enabled for CPU and L2 Cache
 
 config MSM_AVS_HW
 	bool "Enable Adaptive Voltage Scaling (AVS)"
@@ -2830,7 +2854,7 @@ config SEC_THERMISTOR
 	default n
 	help
 	Use thermistor driver for checking temperature near AP chip.
-	  
+
 config EXT_MAINMIC_BIAS
 	depends on ARCH_MSM8930
 	default n
@@ -2913,7 +2937,7 @@ config 2MIC_QUP_I2C_GSBI2
          Say Y here if you want use 2MIC QUP GSBI2.
 	 To compile this option, choose M here:
 	 If unsure, say N here.
-	 
+
 config EXT_ADC_IC
        	depends on ARCH_MSM8930
 	default n
@@ -2980,7 +3004,7 @@ config AUXPCM_INTERFACE
          Say Y here if you want use auxpcm interface for external device.
 	 To compile this option, choose M here:
 	 If unsure, say N here.
-	 
+
 config PCM_ROUTE_VOICE_STUB
 	depends on ARCH_MSM8930
 	default n
@@ -3007,9 +3031,24 @@ config SAMSUNG_PRODUCT_SHIP
 	bool "set up for product shipping"
 	default n
 
+config FORCE_FAST_CHARGE
+	bool "Force fast charging (AC/USB) by Yank555.lu"
+	default n
+	help
+	  A simple sysfs interface to force adapters that
+	  are detected as USB to charge as AC (1A/h) or to set
+	  custom charging currents for AC and USB.
+
 config HAS_MACH_MEMUTILS
 	default n
 	bool "Motorola MSM memcpy enhancements"
 	help
 	Faster memcpy performance for Krait
+
+config AUTOSMP
+	bool "AutoSMP Hotplug"
+	depends on SMP && HOTPLUG_CPU
+	help
+	  Automatically hotplugs the multiple CPU cores based on
+	  CPU load and suspend state.
 endif
